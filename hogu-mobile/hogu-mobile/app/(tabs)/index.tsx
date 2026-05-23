@@ -211,13 +211,26 @@ export default function LandingScreen() {
             <Text style={{ fontSize: 11, color: '#ff6b6b', fontWeight: '600' }}>SIGN OUT</Text>
           </Pressable>
         </View>
+        <View style={{ height: 60 }} />
         {/* Contact for Collabs & Endorsements */}
-        <View style={{ backgroundColor: 'rgba(32, 32, 31, 0.5)', borderRadius: 8, padding: 16, alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(68, 73, 50, 0.3)' }}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#caf300', letterSpacing: 1 }}>COLLABS & ENDORSEMENTS</Text>
-          <View style={{ gap: 6, alignItems: 'center' }}>
-            <Text style={{ fontSize: 13, color: '#ffffff', fontWeight: '600' }}>Dheeraj <Text style={{ color: '#c5c9ac', fontWeight: '400' }}>@Crispy_Dosee</Text></Text>
-            <Text style={{ fontSize: 13, color: '#ffffff', fontWeight: '600' }}>Pratheeka <Text style={{ color: '#c5c9ac', fontWeight: '400' }}>@pratheeka_deepak</Text></Text>
+        <View style={{ backgroundColor: 'rgba(32, 32, 31, 0.6)', borderRadius: 12, padding: 20, alignItems: 'center', gap: 14, borderWidth: 1, borderColor: 'rgba(202, 243, 0, 0.15)' }}>
+          <Text style={{ fontSize: 9, fontWeight: '700', color: '#c5c9ac', letterSpacing: 2, textAlign: 'center' }}>FOR COLLABS, ENDORSEMENTS OR SHARE MEMES</Text>
+          <Text style={{ fontSize: 22, fontWeight: '800', color: '#caf300', letterSpacing: 0.5 }}>HIT US UP ON INSTA</Text>
+          <View style={{ gap: 10, width: '100%' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(42, 42, 42, 0.6)', borderRadius: 8, padding: 12, gap: 12, borderLeftWidth: 3, borderLeftColor: '#E1306C' }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Dheeraj</Text>
+                <Text style={{ fontSize: 12, color: '#E1306C', fontWeight: '600' }}>@Crispy_Dosee</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(42, 42, 42, 0.6)', borderRadius: 8, padding: 12, gap: 12, borderLeftWidth: 3, borderLeftColor: '#E1306C' }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Pratheeka</Text>
+                <Text style={{ fontSize: 12, color: '#E1306C', fontWeight: '600' }}>@pratheeka_deepak</Text>
+              </View>
+            </View>
           </View>
+          <Text style={{ fontSize: 9, color: '#c5c9ac', letterSpacing: 1, marginTop: 4 }}>BUILT DIFFERENT • TRAINED HARDER</Text>
         </View>
         <View style={{ height: 40 }} />
       </View>
