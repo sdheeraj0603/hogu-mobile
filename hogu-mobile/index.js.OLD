@@ -1,0 +1,403 @@
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, AppRegistry, ImageBackground } from 'react-native';
+
+const theme = {
+  colors: {
+    primary: '#caf300',
+    secondary: '#ffb1c3',
+    background: '#131313',
+    surface: '#1c1b1b',
+    card: '#20201f',
+    text: '#ffffff',
+    textSecondary: '#c5c9ac',
+    border: '#444932',
+  },
+  spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
+};
+
+function LoginScreen({ onLogin }) {
+  const [token, setToken] = useState('');
+
+  const handleLogin = () => {
+    if (!token.trim()) {
+      Alert.alert('Error', 'Please enter a Strava token');
+      return;
+    }
+    onLogin(token);
+  };
+
+  return (
+    <ImageBackground
+      source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBFDf1nkGG0ibxlJW-l4zWlgWhpYAw1aWHwAg3ONP6kIbzF9B3XL4mHqDzj21zl1dQJJDeMKUwIENC8Vy4Bv3hPIr2Q_7pW6deoX0JE5wQxkYbWq9iIMA-kCeGMPhio2etnLYgBQ0cfFvGeOgJH12MQl9rpPvxhJUYUgnpf09ArVSynMJcvnLUlv7NdA4ivKpbLGzPoigeM-qF0O4XMCFj8F93V-jZ5yLpzuPjYOuMJU9Kraw1Oh9c4lv9WlRV5AM4Lp4c4JBjOO8FM' }}
+      style={styles.backgroundImage}
+      resizeMode="cover"
+    >
+      <View style={styles.overlay}>
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.loginHeader}>
+            <Text style={styles.appTitle}>HOG-U</Text>
+            <Text style={styles.tagline}>PRECISION NUTRITION</Text>
+            <Text style={styles.mainHeading}>FUEL YOUR RECOVERY</Text>
+            <Text style={styles.subtitle}>Ultra-fast refueling engineered for peak athletic performance. Order your macros in seconds.</Text>
+          </View>
+
+          <View style={styles.highlightBox}>
+            <View style={styles.highlightItem}>
+              <Text style={styles.highlightIcon}>⚡</Text>
+              <Text style={styles.highlightLabel}>EXPRESS DELIVERY</Text>
+              <Text style={styles.highlightValue}>12-15 mins</Text>
+            </View>
+          </View>
+
+          <View style={styles.macroGrid}>
+            <View style={styles.macroCard}>
+              <Text style={styles.macroLabel}>PROTEIN</Text>
+              <Text style={styles.macroValue}>42g</Text>
+            </View>
+            <View style={styles.macroCard}>
+              <Text style={styles.macroLabel}>CARBS</Text>
+              <Text style={styles.macroValue}>58g</Text>
+            </View>
+            <View style={styles.macroCard}>
+              <Text style={styles.macroLabel}>FATS</Text>
+              <Text style={styles.macroValue}>12g</Text>
+            </View>
+          </View>
+
+          <View style={styles.featureList}>
+            <Text style={styles.featureTitle}>CLEAN FUEL PROFILE</Text>
+            <View style={styles.ingredientGrid}>
+              <View style={styles.ingredientCard}>
+                <Text style={styles.ingredientIcon}>🐟</Text>
+                <Text style={styles.ingredientName}>Wild Tuna</Text>
+              </View>
+              <View style={styles.ingredientCard}>
+                <Text style={styles.ingredientIcon}>🧠</Text>
+                <Text style={styles.ingredientName}>Omega-3s</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Strava Access Token</Text>
+            <Text style={styles.hint}>Get from: https://www.strava.com/settings/apps</Text>
+            <TextInput
+              style={styles.inputField}
+              placeholder="Paste token here..."
+              placeholderTextColor={theme.colors.textSecondary}
+              value={token}
+              onChangeText={setToken}
+              secureTextEntry={false}
+            />
+          </View>
+
+          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+            <Text style={styles.loginButtonText}>LOGIN WITH STRAVA</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </ImageBackground>
+  );
+}
+
+function DashboardScreen({ token, onLogout }) {
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Activities</Text>
+        <TouchableOpacity onPress={onLogout}>
+          <Text style={styles.logoutText}>⚙️</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.listContent}>
+        <View style={styles.activityCard}>
+          <Text style={styles.activityType}>BIKE</Text>
+          <Text style={styles.activityName}>Morning Ride</Text>
+          <View style={styles.metrics}>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>25.5</Text>
+              <Text style={styles.metricLabel}>km</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>480</Text>
+              <Text style={styles.metricLabel}>m elev</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>1.2h</Text>
+              <Text style={styles.metricLabel}>time</Text>
+            </View>
+          </View>
+          <Text style={styles.date}>Today</Text>
+        </View>
+
+        <View style={styles.activityCard}>
+          <Text style={styles.activityType}>RUN</Text>
+          <Text style={styles.activityName}>Evening Run</Text>
+          <View style={styles.metrics}>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>8.2</Text>
+              <Text style={styles.metricLabel}>km</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>145</Text>
+              <Text style={styles.metricLabel}>m elev</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>42m</Text>
+              <Text style={styles.metricLabel}>time</Text>
+            </View>
+          </View>
+          <Text style={styles.date}>Yesterday</Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+export default function App() {
+  const [token, setToken] = useState(null);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      {!token ? (
+        <LoginScreen onLogin={setToken} />
+      ) : (
+        <DashboardScreen token={token} onLogout={() => setToken(null)} />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(19, 19, 19, 0.6)',
+  },
+  container: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  scrollContent: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.lg,
+  },
+  loginHeader: {
+    marginBottom: theme.spacing.xl,
+    alignItems: 'center',
+  },
+  appTitle: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  tagline: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+    letterSpacing: 2,
+    marginBottom: theme.spacing.md,
+  },
+  mainHeading: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    marginTop: 4,
+    fontWeight: '400',
+    lineHeight: 20,
+  },
+  highlightBox: {
+    backgroundColor: 'rgba(32, 32, 31, 0.7)',
+    borderRadius: 12,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(202, 243, 0, 0.3)',
+  },
+  highlightItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  highlightIcon: {
+    fontSize: 24,
+  },
+  highlightLabel: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+    flex: 1,
+  },
+  highlightValue: {
+    fontSize: 14,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
+  macroGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  macroCard: {
+    flex: 1,
+    backgroundColor: 'rgba(32, 32, 31, 0.7)',
+    borderRadius: 8,
+    padding: theme.spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(143, 147, 120, 0.3)',
+  },
+  macroLabel: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  macroValue: {
+    fontSize: 16,
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  ingredientGrid: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  ingredientCard: {
+    flex: 1,
+    backgroundColor: 'rgba(32, 32, 31, 0.7)',
+    borderRadius: 8,
+    padding: theme.spacing.md,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(143, 147, 120, 0.3)',
+  },
+  ingredientIcon: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  ingredientName: {
+    fontSize: 14,
+    color: theme.colors.text,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  inputContainer: {
+    marginBottom: theme.spacing.lg,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text,
+    marginBottom: 4,
+  },
+  hint: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.md,
+  },
+  inputField: {
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    color: theme.colors.text,
+  },
+  loginButton: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.md,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(202, 243, 0, 0.5)',
+  },
+  loginButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  logoutText: {
+    fontSize: 20,
+  },
+  listContent: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+  },
+  activityCard: {
+    backgroundColor: 'rgba(32, 32, 31, 0.7)',
+    borderRadius: 12,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderLeftWidth: 4,
+    borderLeftColor: theme.colors.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(143, 147, 120, 0.3)',
+  },
+  activityType: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  activityName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
+  },
+  metrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: theme.spacing.md,
+  },
+  metric: {
+    alignItems: 'center',
+  },
+  metricValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.primary,
+  },
+  metricLabel: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
+  date: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
+});
+
+AppRegistry.registerComponent('main', () => App);
