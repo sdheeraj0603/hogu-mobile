@@ -514,6 +514,54 @@ def strava_start():
     return redirect(auth_url)
 
 
+@app.route('/api/exchange-code', methods=['POST'])
+def exchange_code():
+    """
+    Mobile app sends auth code here after on-device OAuth.
+    Backend exchanges it for tokens and stores them.
+    """
+    data = request.get_json()
+    email = data.get('email')
+    provider = data.get('provider')  # 'strava' or 'google_fit'
+    code = data.get('code')
+    redirect_uri = data.get('redirect_uri', '')
+
+    if not email or not provider or not code:
+        return jsonify({"error": "Missing email, provider, or code"}), 400
+
+    if provider == 'strava':
+        response = requests.post('https://www.strava.com/oauth/token', json={
+            'client_id': STRAVA_CLIENT_ID,
+            'client_secret': STRAVA_CLIENT_SECRET,
+            'code': code,
+            'grant_type': 'authorization_code'
+        })
+        if response.status_code != 200:
+            print(f"[exchange-code] Strava token exchange failed: {response.text}")
+            return jsonify({"error": "Strava token exchange failed", "details": response.text}), 500
+        token_data = response.json()
+        save_user_token(email, 'strava', token_data)
+        return jsonify({"status": "success", "provider": "strava", "athlete": token_data.get('athlete', {}).get('firstname', '')})
+
+    elif provider == 'google_fit':
+        response = requests.post('https://oauth2.googleapis.com/token', data={
+            'client_id': GOOGLE_FIT_CLIENT_ID,
+            'client_secret': GOOGLE_FIT_CLIENT_SECRET,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': redirect_uri
+        })
+        if response.status_code != 200:
+            print(f"[exchange-code] Google token exchange failed: {response.text}")
+            return jsonify({"error": "Google token exchange failed", "details": response.text}), 500
+        token_data = response.json()
+        token_data['expires_at'] = time.time() + token_data.get('expires_in', 3600)
+        save_user_token(email, 'google_fit', token_data)
+        return jsonify({"status": "success", "provider": "google_fit"})
+
+    return jsonify({"error": f"Unknown provider: {provider}"}), 400
+
+
 @app.route('/auth/google/start')
 def google_start():
     """Redirect user to Google OAuth. Pass email as state."""
@@ -551,4 +599,4 @@ if __name__ == '__main__':
     print("   (Samsung Health app > Settings > Connected Services > Google Fit)")
     print()
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)

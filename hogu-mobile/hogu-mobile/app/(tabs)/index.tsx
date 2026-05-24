@@ -3,10 +3,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { router } from 'expo-router';
 import * as Font from 'expo-font';
 
+WebBrowser.maybeCompleteAuthSession();
+
 const API_BASE = 'http://192.168.1.6:5000';
+const STRAVA_CLIENT_ID = '233623';
+const GOOGLE_CLIENT_ID = '716259950891-jjr4ug5iunomeetaikgdf5h9hetdsdau.apps.googleusercontent.com';
+
+// This will be exp://192.168.1.6:8081 in Expo Go, or hogu:// in production
+const REDIRECT_URI = AuthSession.makeRedirectUri({ scheme: 'hogu', preferLocalhost: false });
 
 export default function LandingScreen() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -58,10 +66,29 @@ export default function LandingScreen() {
     }
     try {
       setConnecting('strava');
-      // Open backend OAuth URL in browser
-      await WebBrowser.openBrowserAsync(`${API_BASE}/auth/strava/start?email=${encodeURIComponent(userEmail)}`);
-      // After returning, re-check connections
-      await checkConnections();
+      const redirectUri = REDIRECT_URI;
+      const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&approval_prompt=force&scope=activity:read_all`;
+      
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+      
+      if (result.type === 'success' && result.url) {
+        const params = new URL(result.url).searchParams;
+        const code = params.get('code');
+        if (code) {
+          const res = await fetch(`${API_BASE}/api/exchange-code`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: userEmail, provider: 'strava', code, redirect_uri: redirectUri }),
+          });
+          const data = await res.json();
+          if (data.status === 'success') {
+            Alert.alert('✅ Strava Connected', data.athlete ? `Welcome ${data.athlete}!` : 'Account linked');
+            await checkConnections();
+          } else {
+            Alert.alert('Error', data.error || 'Failed to connect');
+          }
+        }
+      }
     } catch (e: any) {
       Alert.alert('Connection Failed', e.message || 'Could not connect to Strava');
     } finally {
@@ -76,8 +103,30 @@ export default function LandingScreen() {
     }
     try {
       setConnecting('google');
-      await WebBrowser.openBrowserAsync(`${API_BASE}/auth/google/start?email=${encodeURIComponent(userEmail)}`);
-      await checkConnections();
+      const redirectUri = REDIRECT_URI;
+      const scopes = 'https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.body.read https://www.googleapis.com/auth/fitness.location.read';
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=consent`;
+      
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+      
+      if (result.type === 'success' && result.url) {
+        const params = new URL(result.url).searchParams;
+        const code = params.get('code');
+        if (code) {
+          const res = await fetch(`${API_BASE}/api/exchange-code`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: userEmail, provider: 'google_fit', code, redirect_uri: redirectUri }),
+          });
+          const data = await res.json();
+          if (data.status === 'success') {
+            Alert.alert('✅ Google Fit Connected', 'Your fitness data will sync shortly');
+            await checkConnections();
+          } else {
+            Alert.alert('Error', data.error || 'Failed to connect');
+          }
+        }
+      }
     } catch (e: any) {
       Alert.alert('Connection Failed', e.message || 'Could not connect to Google Fit');
     } finally {
