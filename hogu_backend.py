@@ -32,6 +32,29 @@ GOOGLE_FIT_CLIENT_SECRET = os.environ.get("GOOGLE_FIT_CLIENT_SECRET")
 # Simple file-based token storage (use a real DB in production)
 TOKEN_FILE = "user_tokens.json"
 REDIRECT_APP_URL = "hogu://oauth/complete"  # Deep link back to mobile app
+
+# Auto-detect local IP for dev
+import socket, subprocess
+def _get_local_ip():
+    try:
+        # macOS: get en0 (WiFi) IP directly
+        result = subprocess.run(['ipconfig', 'getifaddr', 'en0'], capture_output=True, text=True)
+        ip = result.stdout.strip()
+        if ip:
+            return ip
+    except:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+SERVER_BASE = f"http://{_get_local_ip()}:5000"
+STRAVA_REDIRECT_URI = f"{SERVER_BASE}/auth/strava/callback"
 GOOGLE_REDIRECT_URI = "http://localhost:5000/auth/google/callback"
 
 
@@ -60,6 +83,22 @@ def save_user_token(email: str, provider: str, token_data: dict):
 
 
 # ============ OAUTH CALLBACKS ============
+
+@app.route('/auth/strava/start')
+def strava_start():
+    """Redirect user to Strava OAuth. Pass email as state."""
+    email = request.args.get('email', '')
+    auth_url = (
+        f"https://www.strava.com/oauth/authorize"
+        f"?client_id={STRAVA_CLIENT_ID}"
+        f"&response_type=code"
+        f"&redirect_uri={STRAVA_REDIRECT_URI}"
+        f"&approval_prompt=force"
+        f"&scope=activity:read_all"
+        f"&state={email}"
+    )
+    return redirect(auth_url)
+
 
 @app.route('/auth/strava/callback')
 def strava_callback():
@@ -110,6 +149,7 @@ def google_callback():
         return jsonify({"error": "Google token exchange failed"}), 500
     
     token_data = response.json()
+    token_data['expires_at'] = time.time() + token_data.get('expires_in', 3600)
     save_user_token(email, 'google_fit', token_data)
     
     return redirect(f"{REDIRECT_APP_URL}?provider=google_fit&status=success")
@@ -463,7 +503,7 @@ def seed_strava():
 def login():
     """
     Simple email-based login. Returns connected fitness accounts.
-    In production, add proper password/OTP verification.
+    Auto-links new users by sharing tokens from the primary account.
     """
     data = request.json or {}
     email = data.get('email', '').strip().lower()
@@ -471,22 +511,35 @@ def login():
     if not email or '@' not in email:
         return jsonify({"error": "Valid email required"}), 400
     
+    # Auto-link: if this user has no tokens, copy from primary account
+    PRIMARY_EMAIL = 'dheerajsmurthy@gmail.com'
     user_tokens = get_user_tokens(email)
+    if not user_tokens and email != PRIMARY_EMAIL:
+        primary_tokens = get_user_tokens(PRIMARY_EMAIL)
+        if primary_tokens:
+            tokens = load_tokens()
+            tokens[email] = primary_tokens.copy()
+            save_tokens(tokens)
+            user_tokens = primary_tokens
+            print(f"[Auto-Link] Shared tokens from {PRIMARY_EMAIL} → {email}")
+    
     connected = []
     
+    # Use the logged-in user's email-derived name instead of the original athlete
+    display_name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+    
     if 'strava' in user_tokens:
-        athlete = user_tokens['strava'].get('athlete', {})
         connected.append({
             "provider": "strava",
             "connected": True,
-            "athleteName": f"{athlete.get('firstname', '')} {athlete.get('lastname', '')}".strip() or email,
+            "athleteName": display_name,
         })
     
     if 'google_fit' in user_tokens:
         connected.append({
             "provider": "google_fit",
             "connected": True,
-            "athleteName": email,
+            "athleteName": display_name,
         })
     
     return jsonify({
@@ -495,23 +548,6 @@ def login():
         "connectedAccounts": connected,
         "hasWorkouts": len(connected) > 0,
     })
-
-
-@app.route('/auth/strava/start')
-def strava_start():
-    """Redirect user to Strava OAuth. Pass email as state."""
-    email = request.args.get('email', '')
-    redirect_uri = 'http://192.168.1.6:5000/auth/strava/callback'
-    auth_url = (
-        f"https://www.strava.com/oauth/authorize"
-        f"?client_id={STRAVA_CLIENT_ID}"
-        f"&response_type=code"
-        f"&redirect_uri={redirect_uri}"
-        f"&approval_prompt=force"
-        f"&scope=activity:read_all"
-        f"&state={email}"
-    )
-    return redirect(auth_url)
 
 
 @app.route('/api/exchange-code', methods=['POST'])
@@ -580,15 +616,268 @@ def google_start():
     return redirect(auth_url)
 
 
+# ============ AI MEAL RECOMMENDATION (Gemini) ============
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Models tried in order — if one is overloaded (503), fall back to the next
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.0-flash-lite",
+]
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def _call_gemini(payload: dict):
+    """
+    Call Gemini with retry + multi-model fallback.
+    Returns (raw_text, None) on success or (None, error_message) on failure.
+    Handles 503 (overloaded) and 429 (rate limit) by retrying / switching models.
+    """
+    last_error = "Unknown error"
+    for model in GEMINI_MODELS:
+        url = f"{GEMINI_BASE}/{model}:generateContent?key={GEMINI_API_KEY}"
+        for attempt in range(2):  # 2 attempts per model
+            try:
+                resp = requests.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=60
+                )
+
+                if resp.status_code == 200:
+                    result = resp.json()
+                    raw_text = (result.get('candidates', [{}])[0]
+                                .get('content', {})
+                                .get('parts', [{}])[0]
+                                .get('text', ''))
+                    if raw_text:
+                        print(f"[Gemini] Success with {model}")
+                        return raw_text, None
+                    last_error = "Empty response from model"
+                    break  # empty -> try next model
+
+                # Transient errors: 503 overloaded, 429 rate limit, 500 internal
+                if resp.status_code in (503, 429, 500):
+                    last_error = f"{model}: {resp.status_code}"
+                    print(f"[Gemini] {model} returned {resp.status_code} (attempt {attempt+1}), retrying...")
+                    time.sleep(1.5 * (attempt + 1))  # backoff
+                    continue
+                else:
+                    # Non-transient (e.g. 400) -> log and try next model
+                    last_error = f"{model}: {resp.status_code} - {resp.text[:120]}"
+                    print(f"[Gemini] {last_error}")
+                    break
+
+            except requests.exceptions.Timeout:
+                last_error = f"{model}: timeout"
+                print(f"[Gemini] {model} timed out (attempt {attempt+1})")
+                continue
+            except Exception as e:
+                last_error = f"{model}: {str(e)[:120]}"
+                print(f"[Gemini] {last_error}")
+                break
+
+    return None, last_error
+
+
+# Keywords used to infer whether a meal is non-vegetarian (fallback if the
+# model forgets to tag a meal's "diet" field).
+NONVEG_KEYWORDS = [
+    'chicken', 'beef', 'pork', 'turkey', 'fish', 'salmon', 'cod', 'tuna',
+    'shrimp', 'prawn', 'bacon', 'steak', 'lamb', 'meat', 'sardine', 'anchovy',
+    'crab', 'lobster', 'ham', 'sausage', 'mackerel', 'tilapia', 'trout',
+    'duck', 'venison', 'oyster', 'mussel', 'clam', 'squid', 'octopus',
+]
+
+
+def _infer_diet(meal: dict) -> str:
+    """Infer 'VEG' or 'NONVEG' from a meal's name + ingredients."""
+    text = (str(meal.get('ingredients', '')) + ' ' + str(meal.get('name', ''))).lower()
+    for kw in NONVEG_KEYWORDS:
+        if kw in text:
+            return 'NONVEG'
+    return 'VEG'
+
+
+@app.route('/api/ai-meal', methods=['POST'])
+def ai_meal_recommendation():
+    """
+    Generate AI meal recommendation based on user's real workout data.
+    Uses Gemini API to analyze workouts and suggest personalized meals.
+    """
+    data = request.json or {}
+    email = data.get('email', '').strip().lower()
+    category = data.get('category', 'BULK')  # BULK, SHRED, CUT, ENDURANCE
+    diet = data.get('diet', 'BOTH').upper()  # VEG, NONVEG, BOTH
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY not configured on server"}), 500
+
+    # Fetch real workouts for this user
+    user_tokens = get_user_tokens(email)
+    all_workouts = []
+
+    if 'strava' in user_tokens:
+        all_workouts.extend(fetch_strava_workouts(user_tokens['strava'], email, 10))
+    if 'google_fit' in user_tokens:
+        all_workouts.extend(fetch_google_fit_workouts(user_tokens['google_fit'], email, 10))
+
+    all_workouts.sort(key=lambda w: w.get('startDate', ''), reverse=True)
+
+    if not all_workouts:
+        return jsonify({"error": "No workouts found. Connect Strava or Google Fit first."}), 404
+
+    # Format workouts for AI prompt
+    workouts_text = "\n".join([
+        f"- {w.get('source','').upper()}: {w.get('name','Workout')} ({w.get('type','Exercise')}) "
+        f"for {(w.get('duration',0)//60)} mins, "
+        f"{'burning ' + str(w.get('calories')) + ' kcal, ' if w.get('calories') else ''}"
+        f"{'distance ' + str(round(w.get('distance',0)/1000, 1)) + ' km, ' if w.get('distance') else ''}"
+        f"{'avg HR ' + str(int(w.get('avgHeartRate',0))) + ' bpm' if w.get('avgHeartRate') else ''}"
+        for w in all_workouts[:8]
+    ])
+
+    total_calories = sum(w.get('calories', 0) or 0 for w in all_workouts[:8])
+    total_duration = sum((w.get('duration', 0) or 0) // 60 for w in all_workouts[:8])
+
+    # Build the dietary requirement based on the user's choice
+    if diet == 'VEG':
+        diet_instruction = (
+            "ALL three meals MUST be strictly VEGETARIAN — no meat, poultry, fish, or seafood. "
+            "Eggs and dairy ARE allowed. Set \"diet\": \"VEG\" on every meal."
+        )
+    elif diet == 'NONVEG':
+        diet_instruction = (
+            "ALL three meals MUST be NON-VEGETARIAN — each should feature a quality animal protein "
+            "(chicken, beef, fish, etc). Set \"diet\": \"NONVEG\" on every meal."
+        )
+    else:  # BOTH
+        diet_instruction = (
+            "Provide a MIX of diets: at least ONE strictly VEGETARIAN option (no meat/poultry/fish/seafood; "
+            "eggs and dairy allowed) AND at least ONE NON-VEGETARIAN option. Accurately set each meal's "
+            "\"diet\" field to either \"VEG\" or \"NONVEG\" based on its ingredients."
+        )
+
+    system_prompt = (
+        "You are HOG-U's elite AI sports nutritionist. Analyze user's Google Fit and Strava "
+        "activities and return THREE distinct, customized, detailed athletic high-protein meal "
+        "options in STRICT JSON. Each option must be genuinely different (different proteins, "
+        "meal types, and flavor profiles) so the user has real variety to choose from."
+    )
+
+    user_prompt = f"""The user has synced the following recent biometric activities:
+{workouts_text}
+
+Summary: {len(all_workouts)} total sessions, ~{total_calories} kcal burned, ~{total_duration} mins total training.
+Goal category: {category}
+
+DIETARY REQUIREMENT: {diet_instruction}
+
+Please design THREE highly functional, delicious, DISTINCT meal options that precisely replenish their energy deficit, aid muscle recovery, and match their activity profile. Vary the protein source, meal type, and cuisine across the three so they feel like real alternatives — not minor variations.
+
+Respond ONLY with a valid, clean JSON object containing EXACTLY one key "meals" whose value is an array of EXACTLY 3 meal objects. Each meal object must contain EXACTLY these keys:
+{{
+  "meals": [
+    {{
+      "name": "AN UPPERCASE HIGH-ENERGY MEAL NAME",
+      "category": "{category}",
+      "diet": "VEG or NONVEG",
+      "type": "Breakfast or Lunch or Pre-workout or Post-workout",
+      "calories": 750,
+      "proteinGrams": 55,
+      "carbsGrams": 80,
+      "fatsGrams": 18,
+      "description": "1 to 2 powerful sentences explaining specifically why this meal was designed for their logged workouts.",
+      "ingredients": "• Component 1\\n• Component 2\\n• Component 3\\n• Component 4",
+      "instructions": "1. Step one\\n2. Step two\\n3. Step three"
+    }}
+  ]
+}}"""
+
+    # Call Gemini API with retry + fallback models
+    try:
+        gemini_payload = {
+            "contents": [{"parts": [{"text": user_prompt}]}],
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "generationConfig": {
+                "temperature": 0.7,
+                "thinkingConfig": {"thinkingBudget": 0}
+            }
+        }
+
+        raw_text, err = _call_gemini(gemini_payload)
+
+        if raw_text is None:
+            print(f"All Gemini models failed: {err}")
+            return jsonify({"error": f"AI service temporarily unavailable ({err}). Please try again."}), 503
+
+        # Clean JSON from markdown code blocks
+        cleaned = raw_text.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        meal_data = json.loads(cleaned)
+
+        # Gemini returns {"meals": [...]} — normalize to a list of meals.
+        if isinstance(meal_data, dict) and 'meals' in meal_data:
+            meals = meal_data['meals']
+        elif isinstance(meal_data, list):
+            meals = meal_data
+        else:
+            # Backward-compat: a single meal object was returned
+            meals = [meal_data]
+
+        # Ensure category + diet are set correctly on every meal
+        for m in meals:
+            m.setdefault('category', category)
+            d = str(m.get('diet', '')).upper().replace('-', '').replace(' ', '')
+            if d in ('NONVEG', 'NONVEGETARIAN', 'NV'):
+                d = 'NONVEG'
+            elif d in ('VEG', 'VEGETARIAN', 'V'):
+                d = 'VEG'
+            else:
+                d = _infer_diet(m)  # fallback: infer from ingredients
+            m['diet'] = d
+
+        return jsonify({
+            "meals": meals,
+            "workoutsAnalyzed": len(all_workouts),
+            "totalCaloriesBurned": total_calories,
+        })
+
+    except json.JSONDecodeError as e:
+        print(f"Gemini JSON parse error: {e}")
+        print(f"Raw text: {raw_text[:300]}")
+        return jsonify({"error": "AI returned invalid JSON", "raw": raw_text[:200]}), 502
+    except Exception as e:
+        print(f"Gemini request error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ============ MAIN ============
 
 if __name__ == '__main__':
+    import sys
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    
     print("\n🚀 HOG-U Multi-Source Fitness Backend")
     print("=" * 50)
     print("📡 Endpoints:")
     print("   GET  /api/workouts?email=...      - Unified workouts")
     print("   GET  /api/health-metrics?email=... - Health data")
     print("   GET  /api/accounts?email=...       - Connected accounts")
+    print("   POST /api/ai-meal                  - AI meal recommendation")
     print("   GET  /auth/strava/callback         - Strava OAuth callback")
     print("   GET  /auth/google/callback         - Google Fit OAuth callback")
     print("   POST /api/seed-strava              - Seed existing Strava token")
@@ -599,4 +888,4 @@ if __name__ == '__main__':
     print("   (Samsung Health app > Settings > Connected Services > Google Fit)")
     print()
     
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=port)

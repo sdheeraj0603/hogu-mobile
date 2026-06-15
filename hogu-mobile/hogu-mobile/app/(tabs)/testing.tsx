@@ -1,8 +1,8 @@
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import nutritionEngine from '../services/nutritionEngine';
-import type { Activity, NutritionPlan } from '../services/nutritionEngine';
+import nutritionEngine from '../../services/nutritionEngine';
+import type { Activity, NutritionPlan } from '../../services/nutritionEngine';
 
 const API_BASE = 'http://192.168.1.6:5000';
 
