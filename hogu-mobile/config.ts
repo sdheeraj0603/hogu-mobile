@@ -1,25 +1,38 @@
 import Constants from 'expo-constants';
 
 /**
- * Auto-detect the backend API base URL.
- * In dev, uses the same IP that Expo is serving from (the Mac's local IP).
- * In production, replace with your actual server URL.
+ * Single source of truth for the backend API base URL.
+ *
+ * Priority:
+ *  1. EXPO_PUBLIC_API_BASE — your public backend URL (ngrok tunnel or deployed
+ *     server). Set this so the app works on ANY phone & ANY network, and for
+ *     production builds. e.g.  EXPO_PUBLIC_API_BASE=https://hogu.ngrok-free.app
+ *  2. Expo dev-server IP — auto-detected from Metro (ONLY works for a phone on
+ *     the SAME WiFi as this Mac; fails across networks / locked-down WiFi).
+ *  3. Hardcoded localhost fallback.
+ *
+ * NOTE: when running `expo start --tunnel`, Metro's host is an *.exp.direct
+ * tunnel (for the JS bundle only) — it is NOT your backend. That's why the
+ * env var MUST take priority and we only auto-use the host when it's a real IP.
  */
 function getApiBase(): string {
-  // Production override
-  const PRODUCTION_URL = ''; // Set this when you deploy, e.g. 'https://api.hogu.app'
-  if (PRODUCTION_URL) return PRODUCTION_URL;
+  // 1. Explicit public URL (ngrok / cloud) — best for multi-device + prod
+  const envUrl = process.env.EXPO_PUBLIC_API_BASE;
+  if (envUrl) return envUrl.replace(/\/+$/, '');
 
-  // In Expo dev, get the debuggerHost which contains the Mac's IP
-  const debuggerHost = Constants.expoConfig?.hostUri || Constants.manifest2?.extra?.expoGo?.debuggerHost || '';
-  const ip = debuggerHost.split(':')[0];
-
-  if (ip) {
-    return `http://${ip}:5000`;
+  // 2. Auto-detect the Mac's LAN IP from the Expo dev server (same-network dev)
+  const debuggerHost =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ||
+    '';
+  const host = debuggerHost.split(':')[0];
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  if (isIpv4) {
+    return `http://${host}:5000`;
   }
 
-  // Fallback to your local network IP (from Flask output: 100.64.0.1)
-  return 'http://100.64.0.1:5000';
+  // 3. Last-resort fallback
+  return 'http://127.0.0.1:5000';
 }
 
 export const API_BASE = getApiBase();

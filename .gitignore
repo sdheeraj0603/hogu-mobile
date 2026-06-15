@@ -77,3 +77,7 @@ htmlcov/
 package-lock.json
 yarn.lock
 user_tokens.json
+user_tokens.backup.json
+
+# ngrok binary (downloaded locally, do not commit)
+tools/

@@ -54,8 +54,17 @@ def _get_local_ip():
         return "127.0.0.1"
 
 SERVER_BASE = f"http://{_get_local_ip()}:5000"
+# PUBLIC_URL overrides the auto-detected LAN address with a public HTTPS URL
+# (ngrok tunnel or deployed server) so OAuth redirects work from ANY phone /
+# network. e.g. PUBLIC_URL=https://hogu.ngrok-free.app
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+if PUBLIC_URL:
+    SERVER_BASE = PUBLIC_URL
+
 STRAVA_REDIRECT_URI = f"{SERVER_BASE}/auth/strava/callback"
-GOOGLE_REDIRECT_URI = "http://localhost:5000/auth/google/callback"
+# Google rejects http:// on non-localhost, but accepts the https ngrok/cloud
+# URL — so on a real phone you MUST run with PUBLIC_URL set to https://...
+GOOGLE_REDIRECT_URI = f"{SERVER_BASE}/auth/google/callback" if PUBLIC_URL else "http://localhost:5000/auth/google/callback"
 
 
 # ============ TOKEN STORAGE ============
@@ -502,52 +511,71 @@ def seed_strava():
 @app.route('/api/login', methods=['POST'])
 def login():
     """
-    Simple email-based login. Returns connected fitness accounts.
-    Auto-links new users by sharing tokens from the primary account.
+    Simple email-based login. Returns the user's OWN connected fitness accounts.
+    Each email is independent — every user connects their own Strava / Google Fit.
     """
     data = request.json or {}
     email = data.get('email', '').strip().lower()
-    
+
     if not email or '@' not in email:
         return jsonify({"error": "Valid email required"}), 400
-    
-    # Auto-link: if this user has no tokens, copy from primary account
-    PRIMARY_EMAIL = 'dheerajsmurthy@gmail.com'
+
     user_tokens = get_user_tokens(email)
-    if not user_tokens and email != PRIMARY_EMAIL:
-        primary_tokens = get_user_tokens(PRIMARY_EMAIL)
-        if primary_tokens:
-            tokens = load_tokens()
-            tokens[email] = primary_tokens.copy()
-            save_tokens(tokens)
-            user_tokens = primary_tokens
-            print(f"[Auto-Link] Shared tokens from {PRIMARY_EMAIL} → {email}")
-    
+
     connected = []
-    
-    # Use the logged-in user's email-derived name instead of the original athlete
+
+    # Use the logged-in user's email-derived name
     display_name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
-    
+
     if 'strava' in user_tokens:
         connected.append({
             "provider": "strava",
             "connected": True,
             "athleteName": display_name,
         })
-    
+
     if 'google_fit' in user_tokens:
         connected.append({
             "provider": "google_fit",
             "connected": True,
             "athleteName": display_name,
         })
-    
+
     return jsonify({
         "status": "success",
         "email": email,
         "connectedAccounts": connected,
         "hasWorkouts": len(connected) > 0,
     })
+
+
+@app.route('/api/disconnect', methods=['POST'])
+def disconnect():
+    """
+    Disconnect a provider (strava / google_fit) for a user so they can
+    re-connect a different account.
+    """
+    data = request.json or {}
+    email = data.get('email', '').strip().lower()
+    provider = data.get('provider', '')  # 'strava', 'google_fit', or 'all'
+
+    if not email or '@' not in email:
+        return jsonify({"error": "Valid email required"}), 400
+
+    tokens = load_tokens()
+    if email not in tokens:
+        return jsonify({"status": "success", "message": "Nothing to disconnect"})
+
+    if provider == 'all':
+        tokens.pop(email, None)
+    elif provider in ('strava', 'google_fit'):
+        tokens.get(email, {}).pop(provider, None)
+    else:
+        return jsonify({"error": "provider must be 'strava', 'google_fit', or 'all'"}), 400
+
+    save_tokens(tokens)
+    print(f"[Disconnect] {provider} removed for {email}")
+    return jsonify({"status": "success", "message": f"{provider} disconnected for {email}"})
 
 
 @app.route('/api/exchange-code', methods=['POST'])
@@ -872,6 +900,13 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     
     print("\n🚀 HOG-U Multi-Source Fitness Backend")
+    print("=" * 50)
+    print(f"🌐 SERVER_BASE: {SERVER_BASE}")
+    print(f"   Strava redirect_uri: {STRAVA_REDIRECT_URI}")
+    print(f"   Google redirect_uri: {GOOGLE_REDIRECT_URI}")
+    if not PUBLIC_URL:
+        print("   ⚠️  PUBLIC_URL not set — using LAN IP (same-WiFi only).")
+        print("      Set PUBLIC_URL=https://<your>.ngrok-free.app for any phone/network.")
     print("=" * 50)
     print("📡 Endpoints:")
     print("   GET  /api/workouts?email=...      - Unified workouts")

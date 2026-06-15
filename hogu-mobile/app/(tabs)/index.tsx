@@ -5,16 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
 import * as Font from 'expo-font';
-import Constants from 'expo-constants';
-
-function getApiBase(): string {
-  const debuggerHost = Constants.expoConfig?.hostUri || Constants.manifest2?.extra?.expoGo?.debuggerHost || '';
-  const ip = debuggerHost.split(':')[0];
-  if (ip) return `http://${ip}:5000`;
-  return 'http://192.168.1.6:5000';
-}
-
-const API_BASE = getApiBase();
+import { API_BASE } from '../../config';
 
 export default function LandingScreen() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -59,21 +50,14 @@ export default function LandingScreen() {
     }
   };
 
-  const handleConnectStrava = async () => {
-    if (stravaConnected) {
-      Alert.alert('Strava Linked', `Connected as ${stravaName || userEmail}`);
-      return;
-    }
+  const startStravaOAuth = async () => {
     try {
       setConnecting('strava');
-      // Open backend OAuth URL in browser
       const result = await WebBrowser.openBrowserAsync(
         `${API_BASE}/auth/strava/start?email=${encodeURIComponent(userEmail)}`,
         { dismissButtonStyle: 'done' }
       );
       console.log('[OAuth] Strava browser result:', result.type);
-      // After returning from browser (whether success or cancel), re-check connections
-      // Give backend a moment to save the token
       await new Promise(r => setTimeout(r, 1000));
       await checkConnections();
     } catch (e: any) {
@@ -83,11 +67,34 @@ export default function LandingScreen() {
     }
   };
 
-  const handleConnectGoogle = async () => {
-    if (googleConnected) {
-      Alert.alert('Google Fit Linked', `Connected as ${userEmail}`);
+  const disconnectProvider = async (provider: 'strava' | 'google_fit') => {
+    try {
+      setConnecting(provider === 'strava' ? 'strava' : 'google');
+      await fetch(`${API_BASE}/api/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: userEmail, provider }),
+      });
+      await checkConnections();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not disconnect');
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleConnectStrava = async () => {
+    if (stravaConnected) {
+      Alert.alert('Strava Linked', `Connected as ${stravaName || userEmail}`, [
+        { text: 'Done', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => disconnectProvider('strava') },
+      ]);
       return;
     }
+    await startStravaOAuth();
+  };
+
+  const startGoogleOAuth = async () => {
     try {
       setConnecting('google');
       const result = await WebBrowser.openBrowserAsync(
@@ -102,6 +109,17 @@ export default function LandingScreen() {
     } finally {
       setConnecting(null);
     }
+  };
+
+  const handleConnectGoogle = async () => {
+    if (googleConnected) {
+      Alert.alert('Google Fit Linked', `Connected as ${userEmail}`, [
+        { text: 'Done', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => disconnectProvider('google_fit') },
+      ]);
+      return;
+    }
+    await startGoogleOAuth();
   };
 
   const handleLogout = async () => {

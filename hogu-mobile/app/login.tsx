@@ -2,16 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
-
-function getApiBase(): string {
-  const debuggerHost = Constants.expoConfig?.hostUri || Constants.manifest2?.extra?.expoGo?.debuggerHost || '';
-  const ip = debuggerHost.split(':')[0];
-  if (ip) return `http://${ip}:5000`;
-  return 'http://192.168.1.6:5000';
-}
-
-const API_BASE = getApiBase();
+import { API_BASE } from '../config';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
