@@ -12,9 +12,11 @@ Run: python3 hogu_backend.py
 
 from flask import Flask, request, jsonify, redirect
 import json
+import base64
 import os
 import time
 import requests
+from urllib.parse import urlencode
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -91,12 +93,53 @@ def save_user_token(email: str, provider: str, token_data: dict):
     save_tokens(tokens)
 
 
+# ============ OAUTH STATE + APP REDIRECT HELPERS ============
+
+def encode_oauth_state(email: str, return_url: str) -> str:
+    """
+    Pack the user's email + the app's dynamic return URL into the single OAuth
+    `state` param. The return URL differs per environment — in Expo Go it's
+    exp://<ip>:8081/--/oauth/complete, in a dev/standalone build it's
+    hogu://oauth/complete — so the app sends it and we echo it back, which is
+    what lets WebBrowser.openAuthSessionAsync auto-close the browser.
+    """
+    raw = json.dumps({"email": email or "", "return_url": return_url or REDIRECT_APP_URL})
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def decode_oauth_state(state: str):
+    """Return (email, return_url) from an OAuth state param. Tolerant of the
+    old format where `state` was just the raw email."""
+    if not state:
+        return "", REDIRECT_APP_URL
+    try:
+        padded = state + "=" * (-len(state) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+        return data.get("email", ""), data.get("return_url") or REDIRECT_APP_URL
+    except Exception:
+        # Backward-compat: state used to be the plain email string
+        if "@" in state:
+            return state, REDIRECT_APP_URL
+        return "", REDIRECT_APP_URL
+
+
+def app_redirect(return_url: str, **params):
+    """Redirect the in-app browser back to the mobile app's return URL with
+    status params. EVERY OAuth exit path uses this so the browser ALWAYS
+    closes — success, error, or cancel."""
+    return_url = return_url or REDIRECT_APP_URL
+    sep = "&" if "?" in return_url else "?"
+    return redirect(f"{return_url}{sep}{urlencode(params)}")
+
+
 # ============ OAUTH CALLBACKS ============
 
 @app.route('/auth/strava/start')
 def strava_start():
-    """Redirect user to Strava OAuth. Pass email as state."""
+    """Redirect user to Strava OAuth. Carry email + app return URL in state."""
     email = request.args.get('email', '')
+    return_url = request.args.get('return_url', REDIRECT_APP_URL)
+    state = encode_oauth_state(email, return_url)
     auth_url = (
         f"https://www.strava.com/oauth/authorize"
         f"?client_id={STRAVA_CLIENT_ID}"
@@ -104,7 +147,7 @@ def strava_start():
         f"&redirect_uri={STRAVA_REDIRECT_URI}"
         f"&approval_prompt=force"
         f"&scope=activity:read_all"
-        f"&state={email}"
+        f"&state={state}"
     )
     return redirect(auth_url)
 
@@ -113,11 +156,14 @@ def strava_start():
 def strava_callback():
     """Strava redirects here after user authorizes. Exchange code for token."""
     code = request.args.get('code')
-    email = request.args.get('state')  # We pass email as state param
-    
-    if not code or not email:
-        return jsonify({"error": "Missing code or email"}), 400
-    
+    email, return_url = decode_oauth_state(request.args.get('state'))
+
+    # User cancelled / Strava returned an error -> still bounce back to the app
+    # so the browser closes instead of hanging on a dead page.
+    if request.args.get('error') or not code or not email:
+        reason = request.args.get('error', 'missing_code_or_email')
+        return app_redirect(return_url, provider='strava', status='error', reason=reason)
+
     # Exchange code for token
     response = requests.post('https://www.strava.com/oauth/token', json={
         'client_id': STRAVA_CLIENT_ID,
@@ -125,26 +171,30 @@ def strava_callback():
         'code': code,
         'grant_type': 'authorization_code'
     })
-    
+
     if response.status_code != 200:
-        return jsonify({"error": "Token exchange failed"}), 500
-    
+        print(f"[strava callback] token exchange failed: {response.text[:200]}")
+        return app_redirect(return_url, provider='strava', status='error', reason='token_exchange_failed')
+
     token_data = response.json()
     save_user_token(email, 'strava', token_data)
-    
-    # Redirect back to mobile app
-    return redirect(f"{REDIRECT_APP_URL}?provider=strava&status=success")
+    athlete = token_data.get('athlete', {})
+    print(f"[strava callback] linked {athlete.get('firstname', '?')} {athlete.get('lastname', '')} -> {email}")
+
+    # Redirect back to the app (success) -> browser auto-closes
+    return app_redirect(return_url, provider='strava', status='success')
 
 
 @app.route('/auth/google/callback')
 def google_callback():
     """Google redirects here after user authorizes Google Fit."""
     code = request.args.get('code')
-    email = request.args.get('state')
-    
-    if not code or not email:
-        return jsonify({"error": "Missing code or email"}), 400
-    
+    email, return_url = decode_oauth_state(request.args.get('state'))
+
+    if request.args.get('error') or not code or not email:
+        reason = request.args.get('error', 'missing_code_or_email')
+        return app_redirect(return_url, provider='google_fit', status='error', reason=reason)
+
     # Exchange code for token
     response = requests.post('https://oauth2.googleapis.com/token', data={
         'client_id': GOOGLE_FIT_CLIENT_ID,
@@ -153,15 +203,17 @@ def google_callback():
         'grant_type': 'authorization_code',
         'redirect_uri': GOOGLE_REDIRECT_URI
     })
-    
+
     if response.status_code != 200:
-        return jsonify({"error": "Google token exchange failed"}), 500
-    
+        print(f"[google callback] token exchange failed: {response.text[:200]}")
+        return app_redirect(return_url, provider='google_fit', status='error', reason='token_exchange_failed')
+
     token_data = response.json()
     token_data['expires_at'] = time.time() + token_data.get('expires_in', 3600)
     save_user_token(email, 'google_fit', token_data)
-    
-    return redirect(f"{REDIRECT_APP_URL}?provider=google_fit&status=success")
+    print(f"[google callback] linked google_fit -> {email}")
+
+    return app_redirect(return_url, provider='google_fit', status='success')
 
 
 # ============ DATA ENDPOINTS ============
@@ -628,19 +680,23 @@ def exchange_code():
 
 @app.route('/auth/google/start')
 def google_start():
-    """Redirect user to Google OAuth. Pass email as state."""
+    """Redirect user to Google OAuth. Carry email + app return URL in state."""
     email = request.args.get('email', '')
+    return_url = request.args.get('return_url', REDIRECT_APP_URL)
+    state = encode_oauth_state(email, return_url)
     scopes = 'https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.body.read https://www.googleapis.com/auth/fitness.location.read'
-    auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth"
-        f"?client_id={GOOGLE_FIT_CLIENT_ID}"
-        f"&response_type=code"
-        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
-        f"&scope={scopes}"
-        f"&access_type=offline"
-        f"&prompt=consent"
-        f"&state={email}"
-    )
+    params = {
+        'client_id': GOOGLE_FIT_CLIENT_ID,
+        'response_type': 'code',
+        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'scope': scopes,
+        'access_type': 'offline',
+        # select_account forces the Google account chooser every time, so a
+        # different tester never silently reuses a previously signed-in account.
+        'prompt': 'select_account consent',
+        'state': state,
+    }
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
     return redirect(auth_url)
 
 
@@ -728,6 +784,22 @@ def _infer_diet(meal: dict) -> str:
         if kw in text:
             return 'NONVEG'
     return 'VEG'
+
+
+def _extract_json(raw_text: str):
+    """
+    Robustly extract a JSON object from a model response by isolating the
+    outermost {...} block (tolerates markdown fences / stray prose that
+    occasionally slip in and caused the intermittent 502s).
+    Raises ValueError if no JSON object is found.
+    """
+    if not raw_text:
+        raise ValueError("empty response")
+    start = raw_text.find('{')
+    end = raw_text.rfind('}')
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("no JSON object found")
+    return json.loads(raw_text[start:end + 1])
 
 
 @app.route('/api/ai-meal', methods=['POST'])
@@ -835,27 +907,34 @@ Respond ONLY with a valid, clean JSON object containing EXACTLY one key "meals" 
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "generationConfig": {
                 "temperature": 0.7,
+                # Force the model to emit pure JSON (no prose / markdown fences)
+                # — this is what eliminates the intermittent 502 "invalid JSON".
+                "responseMimeType": "application/json",
                 "thinkingConfig": {"thinkingBudget": 0}
             }
         }
 
-        raw_text, err = _call_gemini(gemini_payload)
+        # Call Gemini and parse. If the model returns malformed JSON (rare, but
+        # it caused the 502s), retry a couple more times before giving up.
+        meal_data = None
+        raw_text = None
+        parse_err = None
+        for parse_attempt in range(3):
+            raw_text, err = _call_gemini(gemini_payload)
+            if raw_text is None:
+                print(f"All Gemini models failed: {err}")
+                return jsonify({"error": f"AI service temporarily unavailable ({err}). Please try again."}), 503
+            try:
+                meal_data = _extract_json(raw_text)
+                break
+            except Exception as pe:
+                parse_err = pe
+                print(f"[Gemini] JSON parse failed (attempt {parse_attempt + 1}/3): {pe}")
 
-        if raw_text is None:
-            print(f"All Gemini models failed: {err}")
-            return jsonify({"error": f"AI service temporarily unavailable ({err}). Please try again."}), 503
-
-        # Clean JSON from markdown code blocks
-        cleaned = raw_text.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        elif cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        meal_data = json.loads(cleaned)
+        if meal_data is None:
+            print(f"Gemini JSON parse error after retries: {parse_err}")
+            print(f"Raw text: {str(raw_text)[:300]}")
+            return jsonify({"error": "AI returned invalid JSON. Please try again."}), 502
 
         # Gemini returns {"meals": [...]} — normalize to a list of meals.
         if isinstance(meal_data, dict) and 'meals' in meal_data:

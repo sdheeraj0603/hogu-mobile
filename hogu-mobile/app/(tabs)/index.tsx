@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import * as Font from 'expo-font';
 import { API_BASE, apiFetch } from '../../config';
@@ -53,12 +54,23 @@ export default function LandingScreen() {
   const startStravaOAuth = async () => {
     try {
       setConnecting('strava');
-      const result = await WebBrowser.openBrowserAsync(
-        `${API_BASE}/auth/strava/start?email=${encodeURIComponent(userEmail)}`,
-        { dismissButtonStyle: 'done' }
-      );
-      console.log('[OAuth] Strava browser result:', result.type);
-      await new Promise(r => setTimeout(r, 1000));
+      // Linking.createURL adapts to the runtime: exp://<ip>/--/oauth/complete in
+      // Expo Go, hogu://oauth/complete in a dev/standalone build. We send it to
+      // the backend AND hand it to openAuthSessionAsync, so the browser
+      // auto-closes the instant the backend redirects back to it.
+      const returnUrl = Linking.createURL('oauth/complete');
+      const startUrl =
+        `${API_BASE}/auth/strava/start?email=${encodeURIComponent(userEmail)}` +
+        `&return_url=${encodeURIComponent(returnUrl)}`;
+      // preferEphemeralSession: true => cookieless private session, so Strava
+      // ALWAYS asks the user to log in fresh instead of silently reusing
+      // whichever Strava account is already signed in on this device.
+      const result = await WebBrowser.openAuthSessionAsync(startUrl, returnUrl, {
+        preferEphemeralSession: true,
+      });
+      console.log('[OAuth] Strava session result:', result.type);
+      // Give the backend a beat to persist the token, then refresh status.
+      await new Promise(r => setTimeout(r, 600));
       await checkConnections();
     } catch (e: any) {
       Alert.alert('Connection Failed', e.message || 'Could not connect to Strava');
@@ -97,12 +109,19 @@ export default function LandingScreen() {
   const startGoogleOAuth = async () => {
     try {
       setConnecting('google');
-      const result = await WebBrowser.openBrowserAsync(
-        `${API_BASE}/auth/google/start?email=${encodeURIComponent(userEmail)}`,
-        { dismissButtonStyle: 'done' }
-      );
-      console.log('[OAuth] Google Fit browser result:', result.type);
-      await new Promise(r => setTimeout(r, 1000));
+      // Same dynamic return URL + cookieless session as Strava. The cookieless
+      // session plus the backend's prompt=select_account makes Google show the
+      // account chooser so a different tester picks their own account.
+      const returnUrl = Linking.createURL('oauth/complete');
+      const startUrl =
+        `${API_BASE}/auth/google/start?email=${encodeURIComponent(userEmail)}` +
+        `&return_url=${encodeURIComponent(returnUrl)}`;
+      const result = await WebBrowser.openAuthSessionAsync(startUrl, returnUrl, {
+        preferEphemeralSession: true,
+      });
+      console.log('[OAuth] Google Fit session result:', result.type);
+      // Give the backend a beat to persist the token, then refresh status.
+      await new Promise(r => setTimeout(r, 600));
       await checkConnections();
     } catch (e: any) {
       Alert.alert('Connection Failed', e.message || 'Could not connect to Google Fit');
