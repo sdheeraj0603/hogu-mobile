@@ -1,7 +1,7 @@
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE } from '../../config';
+import { API_BASE, apiFetch } from '../../config';
 
 interface AIMeal {
   name: string;
@@ -46,7 +46,7 @@ export default function MealsScreen() {
       }
 
       console.log('[Meals] Requesting AI meal for:', email, 'category:', category, 'diet:', diet);
-      const res = await fetch(`${API_BASE}/api/ai-meal`, {
+      const res = await apiFetch(`${API_BASE}/api/ai-meal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, category, diet }),

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE } from '../config';
+import { API_BASE, apiFetch } from '../config';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -20,7 +20,7 @@ export default function LoginScreen() {
     setError('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/login`, {
+      const res = await apiFetch(`${API_BASE}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: trimmed }),

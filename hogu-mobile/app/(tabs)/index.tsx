@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
 import * as Font from 'expo-font';
-import { API_BASE } from '../../config';
+import { API_BASE, apiFetch } from '../../config';
 
 export default function LandingScreen() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -28,7 +28,7 @@ export default function LandingScreen() {
     setUserEmail(email);
 
     try {
-      const res = await fetch(`${API_BASE}/api/accounts?email=${encodeURIComponent(email)}`);
+      const res = await apiFetch(`${API_BASE}/api/accounts?email=${encodeURIComponent(email)}`);
       const accounts = await res.json();
       if (Array.isArray(accounts)) {
         const strava = accounts.find((a: any) => a.provider === 'strava');
@@ -70,7 +70,7 @@ export default function LandingScreen() {
   const disconnectProvider = async (provider: 'strava' | 'google_fit') => {
     try {
       setConnecting(provider === 'strava' ? 'strava' : 'google');
-      await fetch(`${API_BASE}/api/disconnect`, {
+      await apiFetch(`${API_BASE}/api/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: userEmail, provider }),

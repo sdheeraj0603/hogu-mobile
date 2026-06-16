@@ -1,7 +1,7 @@
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE } from '../../config';
+import { API_BASE, apiFetch } from '../../config';
 
 interface UnifiedWorkout {
   id: string;
@@ -40,7 +40,7 @@ export default function TestingScreen() {
       }
 
       console.log('[Testing] Fetching workouts from backend for:', email);
-      const res = await fetch(`${API_BASE}/api/workouts?email=${encodeURIComponent(email)}&limit=20`);
+      const res = await apiFetch(`${API_BASE}/api/workouts?email=${encodeURIComponent(email)}&limit=20`);
       
       if (!res.ok) {
         throw new Error(`Backend error: ${res.status}`);

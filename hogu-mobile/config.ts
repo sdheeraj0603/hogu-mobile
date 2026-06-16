@@ -37,3 +37,23 @@ function getApiBase(): string {
 
 export const API_BASE = getApiBase();
 console.log('[Config] API Base URL:', API_BASE);
+
+/**
+ * Wrapper around fetch() for ALL backend calls.
+ *
+ * Adds the `ngrok-skip-browser-warning` header so ngrok's free-tier
+ * interstitial HTML page never gets returned instead of our JSON (which would
+ * make res.json() throw). Harmless when the backend isn't behind ngrok.
+ *
+ * Usage is identical to fetch():
+ *   const res = await apiFetch(`${API_BASE}/api/login`, { method: 'POST', ... });
+ */
+export function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    headers: {
+      'ngrok-skip-browser-warning': 'true',
+      ...(options.headers || {}),
+    },
+  });
+}
