@@ -31,8 +31,11 @@ STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET")
 GOOGLE_FIT_CLIENT_ID = os.environ.get("GOOGLE_FIT_CLIENT_ID")
 GOOGLE_FIT_CLIENT_SECRET = os.environ.get("GOOGLE_FIT_CLIENT_SECRET")
 
-# Simple file-based token storage (use a real DB in production)
-TOKEN_FILE = "user_tokens.json"
+# File-based token storage. On a cloud host the container filesystem is
+# EPHEMERAL — wiped on every redeploy/restart — so point TOKEN_FILE at a
+# mounted persistent volume (e.g. on Railway attach a volume at /data and set
+# TOKEN_FILE=/data/user_tokens.json). Locally it defaults to ./user_tokens.json.
+TOKEN_FILE = os.environ.get("TOKEN_FILE", "user_tokens.json")
 REDIRECT_APP_URL = "hogu://oauth/complete"  # Deep link back to mobile app
 
 # Auto-detect local IP for dev
@@ -60,6 +63,13 @@ SERVER_BASE = f"http://{_get_local_ip()}:5000"
 # (ngrok tunnel or deployed server) so OAuth redirects work from ANY phone /
 # network. e.g. PUBLIC_URL=https://hogu.ngrok-free.app
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
+# On Railway (and most PaaS) the public host is injected automatically. If
+# PUBLIC_URL wasn't set explicitly, derive it from Railway's domain so OAuth
+# redirects resolve to the real https:// URL with zero manual config.
+if not PUBLIC_URL:
+    _railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    if _railway_domain:
+        PUBLIC_URL = f"https://{_railway_domain}"
 if PUBLIC_URL:
     SERVER_BASE = PUBLIC_URL
 
@@ -78,6 +88,11 @@ def load_tokens() -> dict:
     return {}
 
 def save_tokens(tokens: dict):
+    # Ensure the parent dir exists (e.g. a mounted /data volume) so the first
+    # write on a fresh cloud deploy can't fail on a missing directory.
+    parent = os.path.dirname(TOKEN_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(TOKEN_FILE, 'w') as f:
         json.dump(tokens, f, indent=2)
 
@@ -130,6 +145,22 @@ def app_redirect(return_url: str, **params):
     return_url = return_url or REDIRECT_APP_URL
     sep = "&" if "?" in return_url else "?"
     return redirect(f"{return_url}{sep}{urlencode(params)}")
+
+
+# ============ HEALTH CHECK ============
+
+@app.route('/')
+@app.route('/health')
+def health_check():
+    """Liveness probe for Railway's healthcheck + uptime monitors. Echoes the
+    resolved public base URL so you can confirm PUBLIC_URL / the Railway domain
+    was picked up correctly."""
+    return jsonify({
+        "status": "ok",
+        "service": "hogu-backend",
+        "publicUrl": SERVER_BASE,
+        "time": datetime.now().isoformat(),
+    })
 
 
 # ============ OAUTH CALLBACKS ============
@@ -976,7 +1007,9 @@ Respond ONLY with a valid, clean JSON object containing EXACTLY one key "meals" 
 
 if __name__ == '__main__':
     import sys
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    # Railway / most PaaS inject the port to bind via $PORT. Local dev still
+    # supports an optional positional arg: python3 hogu_backend.py 5000
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 5000))
     
     print("\n🚀 HOG-U Multi-Source Fitness Backend")
     print("=" * 50)

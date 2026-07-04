@@ -1,3 +1,12 @@
-flask==2.3.0
+# ── HOG-U backend runtime deps ──
+# Pinned to the exact versions verified locally so the Railway build behaves
+# identically to dev. Flask 2.3.0 runs on the installed Werkzeug 3.1.8; we pin
+# Werkzeug too so a fresh install can't silently pull an incompatible major.
+Flask==2.3.0
+Werkzeug==3.1.8
 python-dotenv==1.0.0
 requests==2.31.0
+
+# Production WSGI server used by the Procfile / Railway start command.
+# (Flask's built-in dev server is single-threaded and not meant for production.)
+gunicorn==23.0.0
